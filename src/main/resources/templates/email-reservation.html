@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <title>Confirmation de réservation</title>
+</head>
+<body>
+<h1>Confirmation de réservation</h1>
+<p>Bonjour <span th:text="${reservation.prenom + ' ' + reservation.nom}"></span>,</p>
+<p>Votre réservation a été confirmée avec succès.</p>
+
+<h2>Détails de la réservation :</h2>
+<ul>
+    <li>Spectacle: <span th:text="${reservation.spectacleDateLieu.spectacle.titre}"></span></li>
+    <li>Date: <span th:text="${#temporals.format(reservation.spectacleDateLieu.date, 'dd/MM/yyyy HH:mm')}"></span></li>
+    <li>Lieu: <span th:text="${reservation.spectacleDateLieu.lieu}"></span></li>
+    <li>Nombre de places: <span th:text="${reservation.nbPlaces}"></span></li>
+    <li>Référence: <span th:text="${reservation.id}"></span></li>
+</ul>
+
+<p>Merci pour votre confiance !</p>
+</body>
+</html>
