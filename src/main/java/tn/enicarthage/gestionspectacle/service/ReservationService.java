@@ -2,8 +2,9 @@ package tn.enicarthage.gestionspectacle.service;
 
 import jakarta.persistence.EntityNotFoundException;
 import jakarta.transaction.Transactional;
-import lombok.extern.java.Log;
+import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.stereotype.Service;
+import org.hibernate.Hibernate;
 import tn.enicarthage.gestionspectacle.dtos.ReservationDTO;
 import tn.enicarthage.gestionspectacle.model.*;
 import tn.enicarthage.gestionspectacle.repository.*;
@@ -12,7 +13,8 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
-import java.util.logging.Logger;
+import java.util.Objects;
+import java.util.Optional;
 
 @Service
 public class ReservationService {
@@ -20,24 +22,24 @@ public class ReservationService {
     private final SpectacleDateLieuRepository spectacleDateLieuRepository;
     private final UtilisateurRepository utilisateurRepository;
     private final EmailService emailService;
+    private final JavaMailSender mailSender;
 
     public ReservationService(ReservationRepository reservationRepository,
                               SpectacleDateLieuRepository spectacleDateLieuRepository,
                               EmailService emailService,
-                              UtilisateurRepository utilisateurRepository
-                              ) {
+                              UtilisateurRepository utilisateurRepository,
+                              JavaMailSender mailSender) {
         this.reservationRepository = reservationRepository;
         this.spectacleDateLieuRepository = spectacleDateLieuRepository;
         this.utilisateurRepository = utilisateurRepository;
         this.emailService = emailService;
+        this.mailSender = mailSender;
     }
 
+    @Transactional
     public Reservation createReservation(ReservationDTO reservationDTO) {
         SpectacleDateLieu seance = spectacleDateLieuRepository.findById(reservationDTO.getSpectacleDateLieuId())
                 .orElseThrow(() -> new RuntimeException("Séance non trouvée"));
-
-        Reservation reservation = new Reservation();
-        reservation.setSpectacleDateLieu(seance);
 
         // Vérifier les places disponibles
         int placesDisponibles = seance.getCapacite() -
@@ -49,7 +51,10 @@ public class ReservationService {
             throw new RuntimeException("Nombre de places demandé non disponible");
         }
 
+        Reservation reservation = new Reservation();
+        reservation.setSpectacleDateLieu(seance);
         reservation.setNbPlaces(reservationDTO.getNbPlaces());
+
         DateTimeFormatter formatter = DateTimeFormatter.ISO_LOCAL_DATE_TIME;
         reservation.setDateReservation(LocalDateTime.parse(reservationDTO.getDateReservation(), formatter));
         reservation.setPaymentMethod(reservationDTO.getPaymentMethod());
@@ -64,7 +69,6 @@ public class ReservationService {
             reservation.setNom(utilisateur.getNom());
             reservation.setPrenom(utilisateur.getPrenom());
             reservation.setEmail(utilisateur.getEmail());
-
         } else {
             reservation.setNom(reservationDTO.getNom());
             reservation.setPrenom(reservationDTO.getPrenom());
@@ -74,45 +78,55 @@ public class ReservationService {
         }
 
         Reservation savedReservation = reservationRepository.save(reservation);
-
-        // Envoyer email de confirmation
-        try {
-            emailService.envoyerEmailConfirmation(savedReservation);
-        } catch (Exception e) {
-            // Log l'erreur mais ne pas faire échouer la réservation
-            System.out.println("Échec d'envoi d'email" + e);
-        }
-
+        sendConfirmationEmail(savedReservation);
 
         return savedReservation;
+    }
+
+    private void sendConfirmationEmail(Reservation reservation) {
+        try {
+            System.out.println("=== TENTATIVE ENVOI EMAIL ===");
+            System.out.println("Destinataire: " + reservation.getEmail());
+
+            // Recharger l'entité avec toutes les relations
+            Reservation freshReservation = reservationRepository.findById(reservation.getId())
+                    .orElseThrow(() -> new RuntimeException("Reservation non trouvée"));
+
+            // Forcer le chargement des relations
+            Hibernate.initialize(freshReservation.getSpectacleDateLieu());
+            if (freshReservation.getSpectacleDateLieu() != null) {
+                Hibernate.initialize(freshReservation.getSpectacleDateLieu().getSpectacle());
+            }
+
+            System.out.println("Données complètes chargées, envoi email...");
+            emailService.envoyerEmailConfirmation(freshReservation);
+            System.out.println("+++ EMAIL ENVOYE +++");
+        } catch (Exception e) {
+            System.err.println("!!! ERREUR ENVOI EMAIL !!!");
+            e.printStackTrace();
+            throw new RuntimeException("Échec d'envoi de l'email de confirmation", e);
+        }
     }
 
     public List<Reservation> getReservationsByUser(Long userId) {
         return reservationRepository.findByUtilisateurId(userId);
     }
 
+    @Transactional
     public void cancelReservation(Long reservationId) {
-
         Reservation reservation = reservationRepository.findById(reservationId)
                 .orElseThrow(() -> new RuntimeException("Réservation non trouvée"));
-
-
         reservation.setPaymentStatus("CANCELLED");
         reservationRepository.save(reservation);
-
-        // Envoyer email d'annulation
-//        emailService.envoyerEmailAnnulation(reservation);
     }
 
+    @Transactional
     public Reservation createAnonymousReservation(ReservationDTO reservationDTO) {
-        // 1. Validation des données obligatoires pour les anonymes
         validateAnonymousReservationData(reservationDTO);
-
-        // 2. Construction de l'entité Reservation
         Reservation reservation = buildAnonymousReservation(reservationDTO);
-
-        // 4. Sauvegarde
-        return reservationRepository.save(reservation);
+        Reservation savedReservation = reservationRepository.save(reservation);
+        sendConfirmationEmail(savedReservation);
+        return savedReservation;
     }
 
     private void validateAnonymousReservationData(ReservationDTO dto) {
@@ -131,25 +145,24 @@ public class ReservationService {
     }
 
     private Reservation buildAnonymousReservation(ReservationDTO dto) {
-        // Récupération de la séance (à adapter selon votre repository)
         SpectacleDateLieu seance = spectacleDateLieuRepository.findById(dto.getSpectacleDateLieuId())
                 .orElseThrow(() -> new EntityNotFoundException("Séance non trouvée"));
 
         return Reservation.builder()
                 .spectacleDateLieu(seance)
-                .utilisateur(null) // Pas d'utilisateur pour les anonymes
+                .utilisateur(null)
                 .nom(dto.getNom())
                 .prenom(dto.getPrenom())
                 .email(dto.getEmail())
-                .dateReservation(LocalDateTime.now(ZoneId.of("Europe/Paris")))
                 .telephone(dto.getTelephone())
                 .nbPlaces(dto.getNbPlaces())
-                .dateReservation(LocalDateTime.now()) // Date actuelle
+                .dateReservation(LocalDateTime.now(ZoneId.of("Europe/Paris")))
                 .paymentMethod(dto.getPaymentMethod())
                 .paymentStatus("PAID".equals(dto.getPaymentStatus()) ? "PAID" : "PENDING")
-                .avecCompte(false) // Marqué comme réservation sans compte
+                .avecCompte(false)
                 .build();
     }
+
     @Transactional
     public void confirmPayment(Long reservationId) {
         reservationRepository.updatePaymentStatus(reservationId, "PAID");

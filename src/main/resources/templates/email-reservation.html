@@ -12,10 +12,11 @@
 <h2>Détails de la réservation :</h2>
 <ul>
     <li>Spectacle: <span th:text="${reservation.spectacleDateLieu.spectacle.titre}"></span></li>
-    <li>Date: <span th:text="${#temporals.format(reservation.spectacleDateLieu.date, 'dd/MM/yyyy HH:mm')}"></span></li>
-    <li>Lieu: <span th:text="${reservation.spectacleDateLieu.lieu}"></span></li>
+    <li>Date:
+        <span th:text="${#temporals.format(reservation.spectacleDateLieu.date.toLocalDateTime(), 'dd/MM/yyyy HH:mm')}"></span>
+    </li>
+    <li>Lieu: <span th:text="${reservation.spectacleDateLieu.lieu.getNomLieu()}"></span></li>
     <li>Nombre de places: <span th:text="${reservation.nbPlaces}"></span></li>
-    <li>Référence: <span th:text="${reservation.id}"></span></li>
 </ul>
 
 <p>Merci pour votre confiance !</p>
